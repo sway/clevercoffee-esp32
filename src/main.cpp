@@ -1652,7 +1652,7 @@ void looppid() {
 
     if ((millis() - lastTempEvent) > tempEventInterval) {
         //send temperatures to website endpoint
-        sendTempEvent(temperature, brewSetPoint, pidOutput);
+        sendTempEvent(temperature, setPoint, pidOutput);
         lastTempEvent = millis();
 
         #if VERBOSE
