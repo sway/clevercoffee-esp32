@@ -30,12 +30,12 @@ enum EditableKind {
 };
 
 struct editable_t {
-    String templateString;
     String displayName;
     boolean hasHelpText;
     String helpText;
     EditableKind type;
     int section;                   // parameter section number
+    int position;
     std::function<bool()> show;    // method that determines if we show this parameter (in the web interface)
     int minValue;
     int maxValue;
@@ -61,7 +61,7 @@ void setEepromWriteFcn(int (*fcnPtr)(void));
 // Defined in main.cpp
 #define EDITABLE_VARS_LEN 28
 extern std::map<String, editable_t> editableVars;
-std::map<String, editable_t>::iterator it;
+
 
 // EEPROM
 int (*writeToEeprom)(void) = NULL;
@@ -100,86 +100,6 @@ double round2(double value) {
    return (int)(value * 100 + 0.5) / 100.0;
 }
 
-String generateForm(String varName) {
-    for (editable_t e : editableVars) {
-        if (e.templateString != varName) {
-            continue;
-        }
-
-        String result = F("<label class=\"form-label me-1\" for=\"var");
-        result += e.templateString;
-        result += F("\">");
-        result += e.displayName;
-        result += "</label>";
-        if (!e.helpText.isEmpty()) {
-            result += F("<a href=\"#\" role=\"button\" data-bs-toggle=\"popover\" data-bs-html=\"true\" data-bs-original-title=\"");
-            result += e.helpText;
-            result += F("\"><span class=\"fa-solid fa-circle-question\"></span></a></br>");
-        } else {
-            result += F("<br/>");
-        }
-        String currVal;
-
-        switch (e.type) {
-            case kDouble:
-                result += F("<input class=\"form-control form-control-lg\" type=\"number\" step=\"0.1\"");
-                currVal = *(double *)e.ptr;
-                break;
-
-            case kDoubletime:
-                result += F("<input class=\"form-control form-control-lg\" type=\"number\" step=\"0.1\"");
-                currVal = *(double *)e.ptr/1000;
-                break;
-
-            case kInteger:
-                result += F("<input class=\"form-control form-control-lg\" type=\"number\" step=\"1\"");
-                currVal = *(int *)e.ptr;
-                break;
-
-            case kUInt8:
-            {
-                uint8_t val = *(uint8_t *)e.ptr;
-
-                result += F("<input type=\"hidden\" id=\"var");
-                result += e.templateString;
-                result += F("\" name=\"var");
-                result += e.templateString + F("\" value=\"0\" />");
-                result += F("<input type=\"checkbox\" class=\"form-check-input form-control-lg\" id=\"var");
-                result += e.templateString;
-                result += F("\" name=\"var");
-                result += e.templateString;
-                result += F("\" value=\"1\"");
-
-                if (val) {
-                    result += F(" checked=\"checked\"");
-                }
-
-                result += F("><br />");
-
-                break;
-            }
-
-            default:
-                result += F("<input class=\"form-control form-control-lg\" type=\"text\"");
-                currVal = (const char *)e.ptr;
-        }
-
-        if (e.type != kUInt8) {
-            result += F(" id=\"var");
-            result += e.templateString;
-            result += F("\" name=\"var");
-            result += e.templateString;
-            result += F("\" value=\"");
-            result += currVal;
-            result += F("\"><br />");
-        }
-
-        return result;
-    }
-
-    return "(unknown variable " + varName + ")";
-}
-
 String getValue(String varName) {
     try {
         editable_t e = editableVars.at(varName);
@@ -203,10 +123,10 @@ String getValue(String varName) {
     }
 }
 
-void paramToJson(editable_t &e, DynamicJsonDocument &doc) {
+void paramToJson(String name, editable_t &e, DynamicJsonDocument &doc) {
     JsonObject paramObj = doc.createNestedObject();
     paramObj["type"] = e.type;
-    paramObj["name"] = e.templateString;
+    paramObj["name"] = name;
     paramObj["displayName"] = e.displayName;
     paramObj["section"] = e.section;
     paramObj["position"] = e.position;
@@ -276,9 +196,7 @@ String staticProcessor(const String& var) {
     skipHeaterISR = true;
 
     //try replacing var for variables in editableVars
-    if (var.startsWith("VAR_EDIT_")) {
-        return generateForm(var.substring(9)); // cut off "VAR_EDIT_"
-    } else if (var.startsWith("VAR_SHOW_")) {
+    if (var.startsWith("VAR_SHOW_")) {
         return getValue(var.substring(9)); // cut off "VAR_SHOW_"
     } else if (var.startsWith("VAR_HEADER_")) {
         return getHeader(var.substring(11)); // cut off "VAR_HEADER_"
@@ -350,23 +268,23 @@ void serverSetup() {
         // GET = either
         int requestParams = request->params();
         int docLength = EDITABLE_VARS_LEN;
-        if(request->method() == HTTP_GET) {
+        if(request->method() == 1) {
             if(requestParams > 0) {
                 docLength = std::min(requestParams, EDITABLE_VARS_LEN);
             }
-        } else if (request->method() == HTTP_POST) {
+        } else if (request->method() == 2) {
             docLength = std::min(requestParams, EDITABLE_VARS_LEN);
         }
 
         DynamicJsonDocument doc(JSON_STRING_SIZE(262) + JSON_ARRAY_SIZE(docLength) +
                                 JSON_OBJECT_SIZE(9 + 1) * docLength);
 
-        if (request->method() == HTTP_POST) {
+        if (request->method() == 2) {
             // returns values from WebRequestMethod enum -> 2 == HTTP_POST
             // update all given params and match var name in editableVars
 
             for (int i = 0; i < requestParams; i++) {
-                AsyncWebParameter *p = request->getParam(i);
+                AsyncWebParameter* p = request->getParam(i);
                 String varName;
                 if (p->name().startsWith("var")) {
                     varName = p->name().substring(3);
@@ -386,7 +304,7 @@ void serverSetup() {
                         float newVal = atof(p->value().c_str());
                         *(double *)e.ptr = newVal;
                     }
-                    paramToJson(e, doc);
+                    paramToJson(varName, e, doc);
                 } catch (const std::out_of_range &exc) {
                     continue;
                 }
@@ -397,7 +315,7 @@ void serverSetup() {
             request->send(200, "application/json", paramsJson);
 
             // Write to EEPROM
-            if (false) {
+            if (writeToEeprom) {
                 if (writeToEeprom() == 0) {
                     debugPrintln("successfully wrote EEPROM");
                 } else {
@@ -417,6 +335,7 @@ void serverSetup() {
             String paramId =
                 paramCount > 0 ? request->getParam(0)->value() : "";
 
+            std::map<String, editable_t>::iterator it;
             if (!paramId.isEmpty()) {
                 it = editableVars.find(paramId);
             } else {
@@ -425,7 +344,7 @@ void serverSetup() {
 
             for (; it != editableVars.end(); it++) {
                 editable_t e = it->second;
-                paramToJson(e, doc);
+                paramToJson(it->first, e, doc);
 
                 if (!paramId.isEmpty()) {
                     break;
@@ -448,18 +367,18 @@ void serverSetup() {
     server.on("/parameterHelp", HTTP_GET, [](AsyncWebServerRequest *request) {
         DynamicJsonDocument doc(1024);
 
-        AsyncWebParameter *p = request->getParam(0);
+        AsyncWebParameter* p = request->getParam(0);
         if (p == NULL) {
             request->send(422, "text/plain", "parameter is missing");
             return;
         }
-        const String &varValue = p->value();
+        const String& varValue = p->value();
 
         skipHeaterISR = true;
 
         try {
             editable_t e = editableVars.at(varValue);
-            doc["name"] = e.templateString;
+            doc["name"] = varValue;
             doc["helpText"] = e.helpText;
         } catch (const std::out_of_range &exc) {
             request->send(404, "application/json", "parameter not found");
@@ -495,7 +414,10 @@ void serverSetup() {
 
         // go through history values backwards starting from currentIndex and
         // wrap around beginning to include valueCount many values
-        for (int i = mod(historyCurrentIndex - historyValueCount, HISTORY_LENGTH); i != mod(historyCurrentIndex, HISTORY_LENGTH); i = mod(i + 1, HISTORY_LENGTH)) {
+        for (int i = mod(historyCurrentIndex - historyValueCount, HISTORY_LENGTH);
+            i != mod(historyCurrentIndex, HISTORY_LENGTH);
+            i = mod(i + 1, HISTORY_LENGTH))
+        {
             currentTemps.add(round2(tempHistory[0][i]));
             targetTemps.add(round2(tempHistory[1][i]));
             heaterPowers.add(round2(tempHistory[2][i]));
