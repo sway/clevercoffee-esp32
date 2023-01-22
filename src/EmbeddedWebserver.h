@@ -332,8 +332,7 @@ void serverSetup() {
 
             //get parameter id from frst parameter, e.g. /parameters?param=PID_ON
             int paramCount = request->params();
-            String paramId =
-                paramCount > 0 ? request->getParam(0)->value() : "";
+            String paramId = paramCount > 0 ? request->getParam(0)->value() : "";
 
             std::map<String, editable_t>::iterator it;
             if (!paramId.isEmpty()) {
