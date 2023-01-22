@@ -258,7 +258,7 @@ void serverSetup() {
         request->redirect("/");
     });
 
-    server.on("/parameters", HTTP_GET | HTTP_POST,[](AsyncWebServerRequest *request) {
+    server.on("/parameters", HTTP_GET | HTTP_POST, [](AsyncWebServerRequest *request) {
         // stop writing to heater in ISR method (digitalWrite) as it causes
         // crashes when called at the same time as flash is read or written
         skipHeaterISR = true;
@@ -268,8 +268,8 @@ void serverSetup() {
         // GET = either
         int requestParams = request->params();
         int docLength = EDITABLE_VARS_LEN;
-        if(request->method() == 1) {
-            if(requestParams > 0) {
+        if (request->method() == 1) {
+            if (requestParams > 0) {
                 docLength = std::min(requestParams, EDITABLE_VARS_LEN);
             }
         } else if (request->method() == 2) {
@@ -279,7 +279,7 @@ void serverSetup() {
         DynamicJsonDocument doc(JSON_STRING_SIZE(262) + JSON_ARRAY_SIZE(docLength) +
                                 JSON_OBJECT_SIZE(9 + 1) * docLength);
 
-        if (request->method() == 2) {
+        if (request->method() == 2) {   // method() returns values from WebRequestMethod enum -> 2 == HTTP_POST
             // returns values from WebRequestMethod enum -> 2 == HTTP_POST
             // update all given params and match var name in editableVars
 
